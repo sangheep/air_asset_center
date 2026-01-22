@@ -1,0 +1,2020 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Industry Matrix Dashboard - AIR Platform</title>
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://apis.google.com/js/api.js"></script>
+    <script src="https://accounts.google.com/gsi/client"></script>
+    <script src="https://apis.google.com/js/api.js"></script>
+    <script src="https://accounts.google.com/gsi/client"></script>
+    <style>
+        @keyframes bounce {
+            0%, 100% { transform: translateY(0); }
+            50% { transform: translateY(-10px); }
+        }
+        .animate-bounce { animation: bounce 1s ease-in-out infinite; }
+        @keyframes slideIn {
+            from { transform: translateX(100%); opacity: 0; }
+            to { transform: translateX(0); opacity: 1; }
+        }
+        .animate-slide-in { animation: slideIn 0.3s ease-out; }
+        @keyframes fadeInUp {
+            from { transform: translateY(20px); opacity: 0; }
+            to { transform: translateY(0); opacity: 1; }
+        }
+        .animate-fade-in-up { animation: fadeInUp 0.5s ease-out forwards; }
+        @keyframes flowPulse {
+            0%, 100% { opacity: 0.4; }
+            50% { opacity: 1; }
+        }
+        .flow-arrow { animation: flowPulse 2s ease-in-out infinite; }
+        ::-webkit-scrollbar { width: 8px; height: 8px; }
+        ::-webkit-scrollbar-track { background: #f1f1f1; }
+        ::-webkit-scrollbar-thumb { background: #888; border-radius: 4px; }
+        ::-webkit-scrollbar-thumb:hover { background: #555; }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect, useMemo } = React;
+
+        const Dashboard = () => {
+            const [activeTab, setActiveTab] = useState('agent');
+            const [language, setLanguage] = useState('ko');
+            const [zoom, setZoom] = useState(100);
+            const [searchTerm, setSearchTerm] = useState('');
+            const [clickedItem, setClickedItem] = useState(null);
+            const [selectedIndustry, setSelectedIndustry] = useState(null);
+            const [selectedWorkflow, setSelectedWorkflow] = useState(null);
+            const [hoveredWorkflow, setHoveredWorkflow] = useState(null);
+            
+            const [isAdmin, setIsAdmin] = useState(() => localStorage.getItem('isAdmin') === 'true');
+            const [showLoginModal, setShowLoginModal] = useState(false);
+            const [password, setPassword] = useState('');
+            const [loginError, setLoginError] = useState('');
+
+            // 편집 모드 관련 state
+            const [editMode, setEditMode] = useState(false);
+            const [editingItem, setEditingItem] = useState(null);
+            const [editValue, setEditValue] = useState('');
+            const [showAddModal, setShowAddModal] = useState(false);
+            const [addModalCell, setAddModalCell] = useState(null);
+            const [newItemName, setNewItemName] = useState('');
+            
+            // 발표자료 관련 state
+            const [showAddEventModal, setShowAddEventModal] = useState(false);
+            const [newEventName, setNewEventName] = useState('');
+            const [editingCell, setEditingCell] = useState(null);
+            const [editCellValue, setEditCellValue] = useState('');
+            const [editingEventName, setEditingEventName] = useState(null);
+            const [editEventNameValue, setEditEventNameValue] = useState('');
+            
+            // Agent 메모 상태
+            const [agentMemos, setAgentMemos] = useState(() => {
+                const saved = localStorage.getItem('agentMemosV1');
+                return saved ? JSON.parse(saved) : {};
+            });
+            const [showMemoModal, setShowMemoModal] = useState(false);
+            const [currentMemo, setCurrentMemo] = useState({ industry: '', workflow: '', agent: '', text: '' });
+            
+            // Agent 색상 상태
+            const [agentColors, setAgentColors] = useState(() => {
+                const saved = localStorage.getItem('agentColorsV1');
+                return saved ? JSON.parse(saved) : {};
+            });
+            
+            const ADMIN_PASSWORD = 'air2024admin';
+            const AGENT_DRIVE_LINK = 'https://drive.google.com/drive/folders/1emmH25lXfNHuJa-pQFk20Mb9GWljGTVc?usp=sharing';
+            const SALESKIT_DRIVE_LINK = 'https://drive.google.com/drive/folders/1jcWds-T2b5JurKUx-no7HuIF46Qwcpnd?usp=sharing';
+            const PRESENTATION_DRIVE_LINK = 'https://drive.google.com/drive/folders/10GLwu5Lyazv5V3o0w2Ii0ZrcfmBCfqr8?usp=sharing';
+
+            // Google Picker API 설정
+            const GOOGLE_API_KEY = 'YOUR_API_KEY_HERE'; // Google Cloud Console에서 발급
+            const GOOGLE_CLIENT_ID = 'YOUR_CLIENT_ID_HERE'; // Google Cloud Console에서 발급
+            const AGENT_FOLDER_ID = '1emmH25lXfNHuJa-pQFk20Mb9GWljGTVc';
+            const SALESKIT_FOLDER_ID = '1jcWds-T2b5JurKUx-no7HuIF46Qwcpnd';
+            const PRESENTATION_FOLDER_ID = '10GLwu5Lyazv5V3o0w2Ii0ZrcfmBCfqr8';
+            
+            const [pickerApiLoaded, setPickerApiLoaded] = useState(false);
+            const [googleToken, setGoogleToken] = useState(null);
+
+            const translations = {
+                ko: {
+                    title: 'Industry Matrix Dashboard',
+                    subtitle: '산업별 AI Agent 매트릭스 대시보드',
+                    agentTab: 'AI Agent',
+                    saleskitTab: 'Saleskit',
+                    presentationTab: '발표자료',
+                    reset: '초기화',
+                    totalAgents: 'Total Agents',
+                    agents: 'agents',
+                    files: 'files',
+                    searchPlaceholder: 'Agent 검색...',
+                    noData: '없음',
+                    cancel: '취소',
+                    save: '저장',
+                    editMode: '편집 모드',
+                    editComplete: '편집 완료',
+                    addButton: '추가',
+                    addModalTitle: '항목 추가',
+                    enterName: '이름을 입력하세요',
+                    editModeActive: '편집 모드 활성화',
+                    resetConfirm: '초기 상태로 되돌리시겠습니까?',
+                    driveOpen: 'Google Drive 열기',
+                    workflowLabel: 'Workflow',
+                    industryLabel: 'Industry',
+                    adminLogin: '관리자 로그인',
+                    logout: '로그아웃',
+                    password: '비밀번호',
+                    login: '로그인',
+                    wrongPassword: '비밀번호가 틀렸습니다',
+                    loginRequired: '관리자 로그인이 필요합니다',
+                    backToOverview: '← 전체 보기',
+                    clickForMap: '🚇 산업명 클릭 → 특화 Workflow Map',
+                    workflowDiagram: '워크플로우 프로세스',
+                    clickWorkflow: '워크플로우 클릭 시 AI Agent 목록 표시',
+                    clickToConnect: '클릭 → Google Drive',
+                    commonWorkflowTitle: '공통 업무 Workflow',
+                    industryWorkflowTitle: '산업 특화 Workflow Map',
+                    agentList: 'AI Agent 목록',
+                    selectWorkflow: '위 워크플로우를 클릭하여 Agent 목록을 확인하세요',
+                    // 발표자료 관련
+                    eventName: '행사명',
+                    addEvent: '+ 행사 추가',
+                    addEventTitle: '새 행사 추가',
+                    enterEventName: '행사명을 입력하세요',
+                    deleteEvent: '삭제',
+                    months: ['1월', '2월', '3월', '4월', '5월', '6월', '7월', '8월', '9월', '10월', '11월', '12월'],
+                    presentationTitle: '연간 발표자료 일정',
+                    presentationSubtitle: '행사별 월간 발표자료 현황',
+                    clickToEdit: '클릭하여 편집',
+                    industries: {
+                        'FSI': 'FSI (금융)',
+                        '제조': '제조',
+                        '유통': '유통',
+                        'Emerging biz & Game': 'Emerging biz & Game',
+                        'Public': 'Public (공공)',
+                        'Telco&Media': 'Telco & Media',
+                        'Vertical Enterprise': 'Vertical Enterprise'
+                    },
+                    workflowNames: {
+                        '고객 상담': '고객 상담', '문서 관리': '문서 관리', '데이터 분석': '데이터 분석', '의사결정 지원': '의사결정 지원',
+                        '보고서 생성': '보고서 생성', 'HR 프로세스': 'HR 프로세스',
+                        '고객 온보딩': '고객 온보딩', '대출/심사': '대출/심사', '자산 관리': '자산 관리', '고객 이탈 방지': '고객 이탈 방지', '광고 최적화': '광고 최적화',
+                        '수요 예측': '수요 예측', '생산 계획': '생산 계획', '품질 관리': '품질 관리', '설비 유지보수': '설비 유지보수',
+                        '재고 관리': '재고 관리', '매장 운영': '매장 운영', '고객 경험': '고객 경험', '옴니채널': '옴니채널',
+                        '게임 개발': '게임 개발', '콘텐츠 제작': '콘텐츠 제작', '커뮤니티 관리': '커뮤니티 관리', '수익화 전략': '수익화 전략',
+                        '민원 처리': '민원 처리', '정책 분석': '정책 분석', '예산 관리': '예산 관리', '공공 서비스': '공공 서비스',
+                        '콘텐츠 추천': '콘텐츠 추천', '네트워크 최적화': '네트워크 최적화',
+                        '구매 관리': '구매 관리', '지식 관리': '지식 관리', '프로세스 자동화': '프로세스 자동화'
+                    },
+                    saleskitCategories: {
+                        '제안서': '제안서', 'Brochure': 'Brochure', 'Customer Case': 'Customer Case',
+                        '1page deck': '1page deck', 'PR FAQ': 'PR FAQ', 'Charter': 'Charter', 'Demo 영상': 'Demo 영상'
+                    }
+                },
+                en: {
+                    title: 'Industry Matrix Dashboard',
+                    subtitle: 'Industry AI Agent Matrix Dashboard',
+                    agentTab: 'AI Agent',
+                    saleskitTab: 'Saleskit',
+                    presentationTab: 'Presentations',
+                    reset: 'Reset',
+                    totalAgents: 'Total Agents',
+                    agents: 'agents',
+                    files: 'files',
+                    searchPlaceholder: 'Search agents...',
+                    noData: 'None',
+                    cancel: 'Cancel',
+                    save: 'Save',
+                    editMode: 'Edit Mode',
+                    editComplete: 'Done',
+                    addButton: 'Add',
+                    addModalTitle: 'Add Item',
+                    enterName: 'Enter name',
+                    editModeActive: 'Edit mode active',
+                    resetConfirm: 'Reset to initial state?',
+                    driveOpen: 'Opening Drive',
+                    workflowLabel: 'Workflow',
+                    industryLabel: 'Industry',
+                    adminLogin: 'Admin Login',
+                    logout: 'Logout',
+                    password: 'Password',
+                    login: 'Login',
+                    wrongPassword: 'Incorrect password',
+                    loginRequired: 'Admin login required',
+                    backToOverview: '← Back',
+                    clickForMap: '🚇 Click Industry → Workflow Map',
+                    workflowDiagram: 'Workflow Process',
+                    clickWorkflow: 'Click workflow to show AI Agents',
+                    clickToConnect: 'Click → Google Drive',
+                    commonWorkflowTitle: 'Common Workflows',
+                    industryWorkflowTitle: 'Industry-specific Workflow Map',
+                    agentList: 'AI Agent List',
+                    selectWorkflow: 'Click a workflow above to view agents',
+                    eventName: 'Event Name',
+                    addEvent: '+ Add Event',
+                    addEventTitle: 'Add New Event',
+                    enterEventName: 'Enter event name',
+                    deleteEvent: 'Delete',
+                    months: ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'],
+                    presentationTitle: 'Annual Presentation Schedule',
+                    presentationSubtitle: 'Monthly presentation status by event',
+                    clickToEdit: 'Click to edit',
+                    industries: {
+                        'FSI': 'FSI (Finance)',
+                        '제조': 'Manufacturing',
+                        '유통': 'Retail',
+                        'Emerging biz & Game': 'Emerging biz & Game',
+                        'Public': 'Public Sector',
+                        'Telco&Media': 'Telco & Media',
+                        'Vertical Enterprise': 'Vertical Enterprise'
+                    },
+                    workflowNames: {
+                        '고객 상담': 'Customer Service', '문서 관리': 'Document Mgmt', '데이터 분석': 'Data Analysis', '의사결정 지원': 'Decision Support',
+                        '보고서 생성': 'Report Generation', 'HR 프로세스': 'HR Process',
+                        '고객 온보딩': 'Onboarding', '대출/심사': 'Loan Review', '자산 관리': 'Asset Mgmt', '고객 이탈 방지': 'Churn Prevention', '광고 최적화': 'Ad Optimization',
+                        '수요 예측': 'Demand Forecast', '생산 계획': 'Production Plan', '품질 관리': 'Quality Control', '설비 유지보수': 'Maintenance',
+                        '재고 관리': 'Inventory Mgmt', '매장 운영': 'Store Ops', '고객 경험': 'Customer Exp', '옴니채널': 'Omnichannel',
+                        '게임 개발': 'Game Dev', '콘텐츠 제작': 'Content Creation', '커뮤니티 관리': 'Community Mgmt', '수익화 전략': 'Monetization',
+                        '민원 처리': 'Civil Affairs', '정책 분석': 'Policy Analysis', '예산 관리': 'Budget Mgmt', '공공 서비스': 'Public Service',
+                        '콘텐츠 추천': 'Content Recommend', '네트워크 최적화': 'Network Opt',
+                        '구매 관리': 'Procurement', '지식 관리': 'Knowledge Mgmt', '프로세스 자동화': 'Process Auto'
+                    },
+                    saleskitCategories: {
+                        '제안서': 'Proposal', 'Brochure': 'Brochure', 'Customer Case': 'Customer Case',
+                        '1page deck': '1-Page Deck', 'PR FAQ': 'PR FAQ', 'Charter': 'Charter', 'Demo 영상': 'Demo Video'
+                    }
+                }
+            };
+
+            const t = translations[language];
+            const translateWorkflow = (wf) => t.workflowNames[wf] || t.saleskitCategories[wf] || wf;
+            const translateIndustry = (ind) => t.industries[ind] || ind;
+
+            const handleLogin = () => {
+                if (password === ADMIN_PASSWORD) {
+                    setIsAdmin(true);
+                    localStorage.setItem('isAdmin', 'true');
+                    setShowLoginModal(false);
+                    setPassword('');
+                    setLoginError('');
+                } else {
+                    setLoginError(t.wrongPassword);
+                }
+            };
+
+            const handleLogout = () => {
+                setIsAdmin(false);
+                setEditMode(false);
+                localStorage.removeItem('isAdmin');
+            };
+
+            const handleEditModeToggle = () => {
+                if (!isAdmin) {
+                    setShowLoginModal(true);
+                } else {
+                    setEditMode(!editMode);
+                }
+            };
+
+            // AI Agent / Saleskit 편집 함수들
+            const handleDeleteItem = (industry, workflow, itemIndex) => {
+                if (!isAdmin) return;
+                
+                const items = currentData[industry]?.[workflow] || [];
+                const itemName = items[itemIndex] || '';
+                
+                if (!confirm(`"${itemName}"을(를) 삭제하시겠습니까?`)) {
+                    return;
+                }
+                
+                if (activeTab === 'agent') {
+                    setAgentData(prev => {
+                        const newData = JSON.parse(JSON.stringify(prev));
+                        newData[industry][workflow].splice(itemIndex, 1);
+                        if (newData[industry][workflow].length === 0) {
+                            newData[industry][workflow] = ['없음'];
+                        }
+                        return newData;
+                    });
+                } else if (activeTab === 'saleskit') {
+                    setSaleskitData(prev => {
+                        const newData = JSON.parse(JSON.stringify(prev));
+                        newData[industry][workflow].splice(itemIndex, 1);
+                        if (newData[industry][workflow].length === 0) {
+                            newData[industry][workflow] = ['없음'];
+                        }
+                        return newData;
+                    });
+                }
+            };
+
+            const handleEditItem = (industry, workflow, itemIndex, currentName) => {
+                if (!isAdmin) return;
+                const color = getAgentColor(industry, workflow, currentName);
+                setEditingItem({ industry, workflow, itemIndex, color });
+                setEditValue(currentName);
+            };
+
+            const handleSaveEdit = () => {
+                if (!isAdmin) return;
+                if (editingItem && editValue.trim()) {
+                    const { industry, workflow, itemIndex, color } = editingItem;
+                    
+                    if (activeTab === 'agent') {
+                        const oldName = agentData[industry][workflow][itemIndex];
+                        const newName = editValue.trim();
+                        
+                        // 이름이 바뀌면 메모와 색상도 함께 이동
+                        if (oldName !== newName) {
+                            const oldKey = getMemoKey(industry, workflow, oldName);
+                            const newKey = getMemoKey(industry, workflow, newName);
+                            
+                            // 메모 이동
+                            if (agentMemos[oldKey]) {
+                                setAgentMemos(prev => {
+                                    const newMemos = { ...prev };
+                                    newMemos[newKey] = newMemos[oldKey];
+                                    delete newMemos[oldKey];
+                                    return newMemos;
+                                });
+                            }
+                            
+                            // 색상 이동 및 업데이트
+                            setAgentColors(prev => {
+                                const newColors = { ...prev };
+                                if (color) {
+                                    newColors[newKey] = color;
+                                }
+                                delete newColors[oldKey];
+                                return newColors;
+                            });
+                        } else if (color) {
+                            // 이름은 같지만 색상만 변경
+                            setAgentColor(industry, workflow, newName, color);
+                        }
+                        
+                        setAgentData(prev => {
+                            const newData = JSON.parse(JSON.stringify(prev));
+                            newData[industry][workflow][itemIndex] = newName;
+                            return newData;
+                        });
+                    } else if (activeTab === 'saleskit') {
+                        setSaleskitData(prev => {
+                            const newData = JSON.parse(JSON.stringify(prev));
+                            newData[industry][workflow][itemIndex] = editValue.trim();
+                            return newData;
+                        });
+                    }
+                }
+                setEditingItem(null);
+                setEditValue('');
+            };
+
+            const handleCancelEdit = () => {
+                setEditingItem(null);
+                setEditValue('');
+            };
+
+            const handleOpenAddModal = (industry, workflow) => {
+                if (!isAdmin) return;
+                
+                // Google Drive 열기
+                const driveLink = activeTab === 'agent' ? AGENT_DRIVE_LINK : SALESKIT_DRIVE_LINK;
+                window.open(driveLink, '_blank', 'width=1200,height=800');
+                
+                // 모달 열기
+                setAddModalCell({ industry, workflow });
+                setNewItemName('');
+                setShowAddModal(true);
+            };
+
+            const handleAddItem = () => {
+                if (!isAdmin) return;
+                if (addModalCell && newItemName.trim()) {
+                    const { industry, workflow } = addModalCell;
+                    
+                    if (activeTab === 'agent') {
+                        setAgentData(prev => {
+                            const newData = JSON.parse(JSON.stringify(prev));
+                            if (newData[industry][workflow][0] === '없음') {
+                                newData[industry][workflow] = [newItemName.trim()];
+                            } else {
+                                newData[industry][workflow].push(newItemName.trim());
+                            }
+                            return newData;
+                        });
+                    } else if (activeTab === 'saleskit') {
+                        setSaleskitData(prev => {
+                            const newData = JSON.parse(JSON.stringify(prev));
+                            if (newData[industry][workflow][0] === '없음') {
+                                newData[industry][workflow] = [newItemName.trim()];
+                            } else {
+                                newData[industry][workflow].push(newItemName.trim());
+                            }
+                            return newData;
+                        });
+                    }
+                    
+                    setShowAddModal(false);
+                    setAddModalCell(null);
+                    setNewItemName('');
+                }
+            };
+
+            // Google Picker API 초기화
+            useEffect(() => {
+                if (window.gapi) {
+                    window.gapi.load('picker', () => {
+                        setPickerApiLoaded(true);
+                    });
+                }
+            }, []);
+
+            // Google 인증
+            const handleAuthClick = () => {
+                const client = window.google.accounts.oauth2.initTokenClient({
+                    client_id: GOOGLE_CLIENT_ID,
+                    scope: 'https://www.googleapis.com/auth/drive.readonly',
+                    callback: (tokenResponse) => {
+                        setGoogleToken(tokenResponse.access_token);
+                    },
+                });
+                client.requestAccessToken();
+            };
+
+            // Google Picker 열기
+            const openPicker = () => {
+                if (!pickerApiLoaded || !googleToken) {
+                    handleAuthClick();
+                    setTimeout(() => openPicker(), 1000);
+                    return;
+                }
+
+                const folderId = activeTab === 'agent' ? AGENT_FOLDER_ID : SALESKIT_FOLDER_ID;
+                
+                const picker = new window.google.picker.PickerBuilder()
+                    .addView(
+                        new window.google.picker.DocsView()
+                            .setParent(folderId)
+                            .setIncludeFolders(false)
+                    )
+                    .setOAuthToken(googleToken)
+                    .setDeveloperKey(GOOGLE_API_KEY)
+                    .setCallback(pickerCallback)
+                    .setTitle('파일 선택')
+                    .build();
+                
+                picker.setVisible(true);
+            };
+
+            // Picker에서 파일 선택 시 콜백
+            const pickerCallback = (data) => {
+                if (data.action === window.google.picker.Action.PICKED) {
+                    const file = data.docs[0];
+                    setNewItemName(file.name);
+                }
+            };
+
+            // Add 버튼에서 Picker 사용
+            const handleOpenAddModalWithPicker = (industry, workflow) => {
+                if (!isAdmin) return;
+                
+                setAddModalCell({ industry, workflow });
+                setNewItemName('');
+                setShowAddModal(true);
+                
+                // API 키가 설정되어 있으면 Picker 사용
+                if (GOOGLE_API_KEY !== 'YOUR_API_KEY_HERE' && GOOGLE_CLIENT_ID !== 'YOUR_CLIENT_ID_HERE') {
+                    setTimeout(() => openPicker(), 300);
+                } else {
+                    // API 키가 없으면 Drive 링크만 열기
+                    const driveLink = activeTab === 'agent' ? AGENT_DRIVE_LINK : SALESKIT_DRIVE_LINK;
+                    window.open(driveLink, '_blank', 'width=1200,height=800');
+                }
+            };
+
+            // handleResetData는 아래에 정의됨 (중복 제거)
+
+
+            // 공통 워크플로우 - 보고서 생성, HR 프로세스 추가
+            const commonWorkflows = ['고객 상담', '문서 관리', '데이터 분석', '의사결정 지원', '보고서 생성', 'HR 프로세스'];
+
+            // 산업별 특화 워크플로우
+            const industrySpecificWorkflows = {
+                'FSI': ['고객 온보딩', '대출/심사', '자산 관리', '고객 이탈 방지', '광고 최적화'],
+                '제조': ['수요 예측', '생산 계획', '품질 관리', '설비 유지보수'],
+                '유통': ['재고 관리', '매장 운영', '고객 경험', '옴니채널', '고객 이탈 방지', '광고 최적화'],
+                'Emerging biz & Game': ['게임 개발', '콘텐츠 제작', '커뮤니티 관리', '수익화 전략', '고객 이탈 방지'],
+                'Public': ['민원 처리', '정책 분석', '예산 관리', '공공 서비스'],
+                'Telco&Media': ['콘텐츠 추천', '네트워크 최적화', '고객 이탈 방지', '광고 최적화'],
+                'Vertical Enterprise': ['구매 관리', '지식 관리', '프로세스 자동화']
+            };
+
+            // Agent 데이터 - 보고서 생성, HR 프로세스 추가
+            const initialAgentData = {
+                'FSI': {
+                    '고객 상담': ['Customer Service Assistant', 'Asen Chatbot', 'AIBuddies랜덤'],
+                    '문서 관리': ['Google Workspace Assistant', 'Brief / 브리프', 'Sample'],
+                    '데이터 분석': ['SQL agent', 'Market Intelligence Assistant', 'PnL', 'Strategic Thinking Assistant'],
+                    '의사결정 지원': ['Strategic Thinking Assistant', 'Financial Operations Assistant', 'Market Intelligence Assistant'],
+                    '보고서 생성': ['Presentation Assistant', 'Brief / 브리프', 'Financial Operations Assistant'],
+                    'HR 프로세스': ['HR Analytics', 'Hiring Assistant', 'Onboarding Success Assistant'],
+                    '고객 온보딩': ['Tender Assistance', 'Customer Service Assistant', 'Financial Operations Assistant'],
+                    '대출/심사': ['Financial Operations Assistant', 'Brand Context Analyzer', 'Negotiation EA', 'Advanced Vendor Assistant'],
+                    '자산 관리': ['Financial Planning Futurism', 'PnL', 'Market Intelligence Assistant', 'Strategic Thinking Assistant'],
+                    '고객 이탈 방지': ['Brand Context Analyzer', 'Market Intelligence Assistant'],
+                    '광고 최적화': ['Marketing Campaign Assistant', 'Financial Operations Assistant']
+                },
+                '제조': {
+                    '고객 상담': ['Customer Service Assistant', '긴급한일 ASAP_bot'],
+                    '문서 관리': ['Google Workspace 워크스페이스', 'Brief / 브리프'],
+                    '데이터 분석': ['SQL agent', 'Market Intelligence Assistant', 'Strategic Thinking Assistant'],
+                    '의사결정 지원': ['Strategic Thinking Assistant', 'OKR 코치님'],
+                    '보고서 생성': ['Presentation Assistant', 'Brief / 브리프', 'Strategic Thinking Assistant'],
+                    'HR 프로세스': ['HR Analytics', 'Onboarding Success Assistant', 'OKR 코치님'],
+                    '수요 예측': ['Market Intelligence Assistant', 'Google Workspace 워크스페이스', 'Strategic Thinking Assistant', 'SQL agent'],
+                    '생산 계획': ['Onboarding Success Assistant', 'Brief / 브리프', '긴급한 워크챗', 'multi agents', 'SQL agent'],
+                    '품질 관리': ['IT Ops & Comm Analyzer', 'Sample', 'Strategic Thinking Assistant', 'Market Intelligence Assistant', 'OKR 코치님'],
+                    '설비 유지보수': ['IT Ops & Comm Analyzer', 'AIBuddies랜덤', 'Strategic Thinking Assistant', 'multi agents', '긴급한일 ASAP_bot']
+                },
+                '유통': {
+                    '고객 상담': ['Customer Service Assistant', 'Asen Chatbot', 'AIBuddies랜덤', 'Bar Master'],
+                    '문서 관리': ['Google Workspace Assistant', 'content_CURATOR'],
+                    '데이터 분석': ['SQL agent', 'Market Intelligence Assistant', 'Strategic Thinking Assistant'],
+                    '의사결정 지원': ['Strategic Thinking Assistant', 'Market Intelligence Assistant'],
+                    '보고서 생성': ['Presentation Assistant', 'content_CURATOR', 'Brief / 브리프'],
+                    'HR 프로세스': ['HR Analytics', 'Hiring Assistant', 'Onboarding Success Assistant'],
+                    '재고 관리': ['SQL agent', 'Strategic Thinking Assistant', 'Market Intelligence Assistant'],
+                    '매장 운영': ['Onboarding Success Assistant', '긴급한일 ASAP_bot', 'IT Ops & Comm Analyzer'],
+                    '고객 경험': ['Customer Service Assistant', 'Brand Context Analyzer', 'Asen Chatbot'],
+                    '옴니채널': ['Google Workspace Assistant', 'multi agents', 'Marketing Campaign Assistant'],
+                    '고객 이탈 방지': ['Brand Context Analyzer', 'Market Intelligence Assistant', 'Customer Service Assistant'],
+                    '광고 최적화': ['Marketing Campaign Assistant', 'Brand Context Analyzer', 'Market Intelligence Assistant']
+                },
+                'Emerging biz & Game': {
+                    '고객 상담': ['Customer Service Assistant', 'Asen Chatbot', 'AIBuddies랜덤'],
+                    '문서 관리': ['Google Workspace Assistant', 'content_CURATOR', 'Brief / 브리프'],
+                    '데이터 분석': ['SQL agent', 'Market Intelligence Assistant', 'Strategic Thinking Assistant'],
+                    '의사결정 지원': ['Strategic Thinking Assistant', 'Market Intelligence Assistant', 'OKR 코치님'],
+                    '보고서 생성': ['Presentation Assistant', '[NMT] LinkedIn 포스트 앱', 'content_CURATOR'],
+                    'HR 프로세스': ['HR Analytics', 'Magazine HR - Sirage', 'Onboarding Success Assistant'],
+                    '게임 개발': ['multi agents', 'Strategic Thinking Assistant', 'IT Ops & Comm Analyzer'],
+                    '콘텐츠 제작': ['content_CURATOR', 'Presentation Assistant', 'Magazine HR - Sirage', '[NMT] LinkedIn 포스트 앱'],
+                    '커뮤니티 관리': ['Asen Chatbot', 'AIBuddies랜덤', 'Customer Service Assistant'],
+                    '수익화 전략': ['Market Intelligence Assistant', 'PnL', 'Financial Operations Assistant', 'Strategic Thinking Assistant'],
+                    '고객 이탈 방지': ['Brand Context Analyzer', 'Market Intelligence Assistant', 'Customer Service Assistant']
+                },
+                'Public': {
+                    '고객 상담': ['Customer Service Assistant', 'Asen Chatbot', 'AIBuddies랜덤'],
+                    '문서 관리': ['Google Workspace Assistant', 'content_CURATOR', 'Brief / 브리프', 'Sample'],
+                    '데이터 분석': ['SQL agent', 'Strategic Thinking Assistant', 'Market Intelligence Assistant'],
+                    '의사결정 지원': ['Strategic Thinking Assistant', 'Market Intelligence Assistant', 'OKR 코치님'],
+                    '보고서 생성': ['Presentation Assistant', 'Brief / 브리프', '[NMT] LinkedIn 포스트 앱'],
+                    'HR 프로세스': ['HR Analytics', 'Hiring Assistant', 'Onboarding Success Assistant', 'OKR 코치님'],
+                    '민원 처리': ['Customer Service Assistant', 'Asen Chatbot', '긴급한일 ASAP_bot', 'Sample'],
+                    '정책 분석': ['Strategic Thinking Assistant', 'Market Intelligence Assistant', 'Brand Context Analyzer'],
+                    '예산 관리': ['Financial Operations Assistant', 'PnL', 'SQL agent'],
+                    '공공 서비스': ['Customer Service Assistant', 'Asen Chatbot', 'Presentation Assistant', 'content_CURATOR']
+                },
+                'Telco&Media': {
+                    '고객 상담': ['Customer Service Assistant', 'Asen Chatbot', 'AIBuddies랜덤'],
+                    '문서 관리': ['Google Workspace Assistant', 'content_CURATOR'],
+                    '데이터 분석': ['SQL agent', 'Market Intelligence Assistant', 'Strategic Thinking Assistant'],
+                    '의사결정 지원': ['Strategic Thinking Assistant', 'Market Intelligence Assistant'],
+                    '보고서 생성': ['Presentation Assistant', '[NMT] LinkedIn 포스트 앱', 'content_CURATOR'],
+                    'HR 프로세스': ['HR Analytics', 'Hiring Assistant', 'Magazine HR - Sirage'],
+                    '콘텐츠 추천': ['Brand Context Analyzer', 'Market Intelligence Assistant', 'content_CURATOR', 'Presentation Assistant', 'Sales Enablement Assistant'],
+                    '네트워크 최적화': ['IT Ops & Comm Analyzer', 'SQL agent', 'Strategic Thinking Assistant', 'IT Strategy Newsletter', 'multi agents', 'Campaign: MAE Assistant'],
+                    '고객 이탈 방지': ['Brand Context Analyzer', 'Market Intelligence Assistant', 'Marketing Campaign Assistant', 'Negotiation EA', 'Campaign: MAE Assistant', 'Sales Enablement Assistant'],
+                    '광고 최적화': ['Marketing Campaign Assistant', 'Brand Context Analyzer', 'Financial Operations Assistant', 'Advanced Vendor Assistant', 'Market Intelligence Assistant', 'PnL']
+                },
+                'Vertical Enterprise': {
+                    '고객 상담': ['Customer Service Assistant', 'Asen Chatbot', 'Sample', 'Bar Master'],
+                    '문서 관리': ['Google Workspace Assistant', 'Google Workspace 워크스페이스', 'content_CURATOR', 'Brief / 브리프', 'SQL agent', 'Sample', 'multi agents'],
+                    '데이터 분석': ['SQL agent', 'Strategic Thinking Assistant', 'Market Intelligence Assistant'],
+                    '의사결정 지원': ['Strategic Thinking Assistant', 'Market Intelligence Assistant', 'OKR 코치님'],
+                    '보고서 생성': ['Presentation Assistant', 'Brief / 브리프', '[NMT] LinkedIn 포스트 앱', 'content_CURATOR'],
+                    'HR 프로세스': ['HR Analytics', 'Hiring Assistant', '[NMT] LinkedIn 포스트 앱', 'Onboarding Success Assistant', 'Magazine HR - Sirage', 'OKR 코치님'],
+                    '구매 관리': ['긴급한일 ASAP_bot', 'In house Administrative Assistant Agent v3', 'Advanced Vendor Assistant', 'Negotiation EA', 'Tender Assistance', 'Brief / 브리프'],
+                    '지식 관리': ['content_CURATOR', 'Strategic Thinking Assistant', '일지', '포스터 대변 워크플로우', 'Asen Chatbot', 'Sample', 'Bar Master'],
+                    '프로세스 자동화': ['multi agents', 'Brief / 브리프', 'Google Workspace 워크스페이스']
+                }
+            };
+
+            const initialSaleskitData = {
+                'FSI': {
+                    '제안서': ['FSI_Proposal_Q1_2024.pptx', 'Banking_Solution_Proposal.pdf', 'Insurance_Platform_RFP.docx'],
+                    'Brochure': ['FSI_Product_Brochure_2024.pdf', 'Digital_Banking_Brochure.pdf'],
+                    'Customer Case': ['KB_Bank_Case_Study.pdf', 'Samsung_Life_Success_Story.pdf'],
+                    '1page deck': ['FSI_Overview_1pager.pdf'],
+                    'PR FAQ': ['FSI_AI_Platform_FAQ.pdf'],
+                    'Charter': ['FSI_Project_Charter_2024.pdf'],
+                    'Demo 영상': ['FSI_Banking_Platform_Demo.mp4', 'AI_Risk_Management_Demo.mp4']
+                },
+                '제조': {
+                    '제안서': ['Manufacturing_AI_Proposal.pptx', 'Smart_Factory_Solution.pdf'],
+                    'Brochure': ['제조_산업_브로셔_2024.pdf'],
+                    'Customer Case': ['Hyundai_Motor_Case.pdf', 'Samsung_Electronics_Story.pdf'],
+                    '1page deck': ['제조_솔루션_1page.pdf'],
+                    'PR FAQ': ['Manufacturing_FAQ_KR.pdf'],
+                    'Charter': ['Smart_Factory_Charter.pdf'],
+                    'Demo 영상': ['Smart_Factory_Demo.mp4', 'Quality_Control_AI_Demo.mp4']
+                },
+                '유통': {
+                    '제안서': ['Retail_AI_Platform_Proposal.pptx', 'Omnichannel_Solution.pdf'],
+                    'Brochure': ['유통_혁신_브로셔_2024.pdf', 'Retail_AI_Overview.pdf'],
+                    'Customer Case': ['Lotte_Retail_Case.pdf', 'GS_Retail_Success.pdf', 'Emart_Implementation.pdf'],
+                    '1page deck': ['Retail_Platform_Brief.pdf'],
+                    'PR FAQ': ['Retail_AI_FAQ.pdf'],
+                    'Charter': ['Retail_Digital_Charter.pdf'],
+                    'Demo 영상': ['Omnichannel_Experience_Demo.mp4', 'Smart_Store_Demo.mp4']
+                },
+                'Emerging biz & Game': {
+                    '제안서': ['Game_AI_Platform_Proposal.pptx', 'Content_Creator_Solution.pdf'],
+                    'Brochure': ['Gaming_AI_Brochure.pdf', 'Creator_Economy_Overview.pdf'],
+                    'Customer Case': ['Nexon_Game_Case.pdf', 'NCsoft_AI_Story.pdf'],
+                    '1page deck': ['Gaming_AI_Brief.pdf'],
+                    'PR FAQ': ['Game_Platform_FAQ.pdf'],
+                    'Charter': ['Gaming_Innovation_Charter.pdf'],
+                    'Demo 영상': ['AI_NPC_Behavior_Demo.mp4', 'Game_Balance_AI_Demo.mp4']
+                },
+                'Public': {
+                    '제안서': ['Public_Sector_AI_Proposal.pptx', 'Government_Solution.pdf'],
+                    'Brochure': ['Public_Sector_Brochure.pdf'],
+                    'Customer Case': ['Seoul_City_Case.pdf', 'Ministry_Implementation.pdf'],
+                    '1page deck': ['Public_Sector_Brief.pdf'],
+                    'PR FAQ': ['Public_Sector_FAQ.pdf'],
+                    'Charter': ['Public_AI_Charter.pdf'],
+                    'Demo 영상': ['Smart_City_Dashboard_Demo.mp4', 'Citizen_Service_AI_Demo.mp4']
+                },
+                'Telco&Media': {
+                    '제안서': ['5G_AI_Platform_Proposal.pptx', 'Media_Analytics_Solution.pdf'],
+                    'Brochure': ['Telco_Media_Brochure.pdf'],
+                    'Customer Case': ['SKT_Implementation.pdf', 'KT_Success_Story.pdf'],
+                    '1page deck': ['Telco_Solution_Brief.pdf'],
+                    'PR FAQ': ['Telco_Platform_FAQ.pdf'],
+                    'Charter': ['5G_AI_Project_Charter.pdf'],
+                    'Demo 영상': ['5G_Network_Optimization_Demo.mp4', 'Content_Recommendation_Demo.mp4']
+                },
+                'Vertical Enterprise': {
+                    '제안서': ['Enterprise_AI_Platform_Proposal.pptx', 'Cross_Functional_Solution.pdf'],
+                    'Brochure': ['Enterprise_Solution_Brochure.pdf'],
+                    'Customer Case': ['Lotte_Group_Case.pdf', 'Doosan_Implementation.pdf'],
+                    '1page deck': ['Enterprise_Platform_1pager.pdf'],
+                    'PR FAQ': ['Enterprise_FAQ.pdf'],
+                    'Charter': ['Enterprise_AI_Charter.pdf'],
+                    'Demo 영상': ['Enterprise_Document_Management_Demo.mp4', 'HR_Process_Automation_Demo.mp4']
+                }
+            };
+
+            // 발표자료 초기 데이터
+            const initialPresentationData = {
+                events: [
+                    { id: 1, name: 'AWS Summit Seoul' },
+                    { id: 2, name: 'Google Cloud Next' },
+                    { id: 3, name: 'Microsoft Ignite' },
+                    { id: 4, name: 'AI Expo Korea' },
+                    { id: 5, name: 'Digital Transformation Forum' }
+                ],
+                schedule: {
+                    1: { 3: 'AI Platform 소개', 6: 'Case Study 발표' },
+                    2: { 5: 'Cloud AI 세션', 9: '기술 워크샵' },
+                    3: { 2: 'Enterprise AI', 11: 'Partner Summit' },
+                    4: { 4: 'AIR Studio Demo', 7: 'Industry Session', 10: '연말 컨퍼런스' },
+                    5: { 1: '신년 세미나', 6: '중간 리뷰', 12: '성과 공유' }
+                }
+            };
+
+            const [agentData, setAgentData] = useState(() => {
+                const saved = localStorage.getItem('agentDataV7');
+                return saved ? JSON.parse(saved) : initialAgentData;
+            });
+
+            const [saleskitData, setSaleskitData] = useState(() => {
+                const saved = localStorage.getItem('saleskitDataV7');
+                return saved ? JSON.parse(saved) : initialSaleskitData;
+            });
+
+            const [presentationData, setPresentationData] = useState(() => {
+                const saved = localStorage.getItem('presentationDataV1');
+                return saved ? JSON.parse(saved) : initialPresentationData;
+            });
+
+            useEffect(() => {
+                localStorage.setItem('agentDataV7', JSON.stringify(agentData));
+            }, [agentData]);
+
+            useEffect(() => {
+                localStorage.setItem('saleskitDataV7', JSON.stringify(saleskitData));
+            }, [saleskitData]);
+
+            useEffect(() => {
+                localStorage.setItem('presentationDataV1', JSON.stringify(presentationData));
+            }, [presentationData]);
+
+            useEffect(() => {
+                localStorage.setItem('agentMemosV1', JSON.stringify(agentMemos));
+            }, [agentMemos]);
+
+            useEffect(() => {
+                localStorage.setItem('agentColorsV1', JSON.stringify(agentColors));
+            }, [agentColors]);
+
+            useEffect(() => {
+                if (selectedIndustry && activeTab === 'agent') {
+                    const workflows = industrySpecificWorkflows[selectedIndustry];
+                    if (workflows && workflows.length > 0) {
+                        setSelectedWorkflow(workflows[0]);
+                    }
+                }
+            }, [selectedIndustry, activeTab]);
+
+            useEffect(() => {
+                if (!editMode) {
+                    setEditingItem(null);
+                    setEditValue('');
+                }
+            }, [editMode]);
+
+            const currentData = activeTab === 'agent' ? agentData : saleskitData;
+            const currentDriveLink = activeTab === 'agent' ? AGENT_DRIVE_LINK : SALESKIT_DRIVE_LINK;
+            const saleskitCategories = ['제안서', 'Brochure', 'Customer Case', '1page deck', 'PR FAQ', 'Charter', 'Demo 영상'];
+            const industries = ['FSI', '제조', '유통', 'Emerging biz & Game', 'Public', 'Telco&Media', 'Vertical Enterprise'];
+
+            const workflowColors = {
+                '고객 상담': '#9333ea', '문서 관리': '#64748b', '데이터 분석': '#f59e0b', '의사결정 지원': '#ec4899',
+                '보고서 생성': '#6366f1', 'HR 프로세스': '#14b8a6',
+                '고객 온보딩': '#2563eb', '대출/심사': '#dc2626', '자산 관리': '#16a34a', '고객 이탈 방지': '#ea580c', '광고 최적화': '#0891b2',
+                '수요 예측': '#2563eb', '생산 계획': '#dc2626', '품질 관리': '#16a34a', '설비 유지보수': '#7c3aed',
+                '재고 관리': '#2563eb', '매장 운영': '#dc2626', '고객 경험': '#16a34a', '옴니채널': '#7c3aed',
+                '게임 개발': '#2563eb', '콘텐츠 제작': '#dc2626', '커뮤니티 관리': '#16a34a', '수익화 전략': '#7c3aed',
+                '민원 처리': '#2563eb', '정책 분석': '#dc2626', '예산 관리': '#16a34a', '공공 서비스': '#7c3aed',
+                '콘텐츠 추천': '#2563eb', '네트워크 최적화': '#dc2626',
+                '구매 관리': '#dc2626', '지식 관리': '#16a34a', '프로세스 자동화': '#7c3aed'
+            };
+
+            const handleItemClick = (itemName) => {
+                setClickedItem(itemName);
+                window.open(currentDriveLink, '_blank', 'noopener,noreferrer');
+                setTimeout(() => setClickedItem(null), 2000);
+            };
+
+            const handleResetData = () => {
+                if (!isAdmin) { alert(t.loginRequired); return; }
+                if (confirm(t.resetConfirm)) {
+                    if (activeTab === 'agent') {
+                        setAgentData(initialAgentData);
+                        localStorage.setItem('agentDataV7', JSON.stringify(initialAgentData));
+                    } else if (activeTab === 'saleskit') {
+                        setSaleskitData(initialSaleskitData);
+                        localStorage.setItem('saleskitDataV7', JSON.stringify(initialSaleskitData));
+                    } else if (activeTab === 'presentation') {
+                        setPresentationData(initialPresentationData);
+                        localStorage.setItem('presentationDataV1', JSON.stringify(initialPresentationData));
+                    }
+                }
+            };
+
+            // 발표자료 - 행사 추가
+            const handleAddEvent = () => {
+                if (newEventName.trim()) {
+                    const newId = Math.max(...presentationData.events.map(e => e.id), 0) + 1;
+                    setPresentationData(prev => ({
+                        ...prev,
+                        events: [...prev.events, { id: newId, name: newEventName.trim() }],
+                        schedule: { ...prev.schedule, [newId]: {} }
+                    }));
+                    setNewEventName('');
+                    setShowAddEventModal(false);
+                }
+            };
+
+            // 발표자료 - 행사 삭제
+            const handleDeleteEvent = (eventId) => {
+                if (confirm('이 행사를 삭제하시겠습니까?')) {
+                    setPresentationData(prev => {
+                        const newSchedule = { ...prev.schedule };
+                        delete newSchedule[eventId];
+                        return {
+                            ...prev,
+                            events: prev.events.filter(e => e.id !== eventId),
+                            schedule: newSchedule
+                        };
+                    });
+                }
+            };
+
+            // 발표자료 - 셀 편집 저장
+            const handleSaveCellEdit = () => {
+                if (editingCell) {
+                    const { eventId, month } = editingCell;
+                    setPresentationData(prev => {
+                        const newSchedule = { ...prev.schedule };
+                        if (!newSchedule[eventId]) newSchedule[eventId] = {};
+                        if (editCellValue.trim()) {
+                            newSchedule[eventId][month] = editCellValue.trim();
+                        } else {
+                            delete newSchedule[eventId][month];
+                        }
+                        return { ...prev, schedule: newSchedule };
+                    });
+                    setEditingCell(null);
+                    setEditCellValue('');
+                }
+            };
+
+            // 발표자료 - 행사명 편집
+            const handleEditEventName = (eventId, currentName) => {
+                if (!isAdmin) return;
+                setEditingEventName(eventId);
+                setEditEventNameValue(currentName);
+            };
+
+            const handleSaveEventName = () => {
+                if (editingEventName && editEventNameValue.trim()) {
+                    setPresentationData(prev => ({
+                        ...prev,
+                        events: prev.events.map(e => 
+                            e.id === editingEventName 
+                                ? { ...e, name: editEventNameValue.trim() } 
+                                : e
+                        )
+                    }));
+                }
+                setEditingEventName(null);
+                setEditEventNameValue('');
+            };
+
+            const handleCancelEventNameEdit = () => {
+                setEditingEventName(null);
+                setEditEventNameValue('');
+            };
+
+            // 발표자료 - 셀 값 클릭 시 Google Drive 열기
+            const handlePresentationCellClick = (cellValue) => {
+                if (cellValue && !editMode) {
+                    window.open(PRESENTATION_DRIVE_LINK, '_blank', 'width=1200,height=800');
+                    setClickedItem(cellValue);
+                    setTimeout(() => setClickedItem(null), 2000);
+                }
+            };
+
+            // 발표자료 - Google Picker로 파일 선택
+            const openPresentationPicker = () => {
+                if (GOOGLE_API_KEY === 'YOUR_API_KEY_HERE' || GOOGLE_CLIENT_ID === 'YOUR_CLIENT_ID_HERE') {
+                    // API 키가 없으면 Drive 링크 열기
+                    window.open(PRESENTATION_DRIVE_LINK, '_blank', 'width=1200,height=800');
+                    return;
+                }
+
+                if (!pickerApiLoaded || !googleToken) {
+                    handleAuthClick();
+                    setTimeout(() => openPresentationPicker(), 1000);
+                    return;
+                }
+
+                const picker = new window.google.picker.PickerBuilder()
+                    .addView(
+                        new window.google.picker.DocsView()
+                            .setParent(PRESENTATION_FOLDER_ID)
+                            .setIncludeFolders(false)
+                    )
+                    .setOAuthToken(googleToken)
+                    .setDeveloperKey(GOOGLE_API_KEY)
+                    .setCallback((data) => {
+                        if (data.action === window.google.picker.Action.PICKED) {
+                            const file = data.docs[0];
+                            setEditCellValue(file.name);
+                        }
+                    })
+                    .setTitle('파일 선택')
+                    .build();
+                
+                picker.setVisible(true);
+            };
+
+            // Agent 메모 함수들
+            const getMemoKey = (industry, workflow, agent) => {
+                return `${industry}|||${workflow}|||${agent}`;
+            };
+
+            const handleOpenMemo = (industry, workflow, agent) => {
+                const key = getMemoKey(industry, workflow, agent);
+                setCurrentMemo({
+                    industry,
+                    workflow,
+                    agent,
+                    text: agentMemos[key] || ''
+                });
+                setShowMemoModal(true);
+            };
+
+            const handleSaveMemo = () => {
+                const key = getMemoKey(currentMemo.industry, currentMemo.workflow, currentMemo.agent);
+                setAgentMemos(prev => ({
+                    ...prev,
+                    [key]: currentMemo.text
+                }));
+                setShowMemoModal(false);
+            };
+
+            const handleDeleteMemo = () => {
+                const key = getMemoKey(currentMemo.industry, currentMemo.workflow, currentMemo.agent);
+                setAgentMemos(prev => {
+                    const newMemos = { ...prev };
+                    delete newMemos[key];
+                    return newMemos;
+                });
+                setShowMemoModal(false);
+            };
+
+            const hasMemo = (industry, workflow, agent) => {
+                const key = getMemoKey(industry, workflow, agent);
+                return agentMemos[key] && agentMemos[key].trim() !== '';
+            };
+
+            const getAgentColor = (industry, workflow, agent) => {
+                const key = getMemoKey(industry, workflow, agent);
+                return agentColors[key] || 'black';
+            };
+
+            const setAgentColor = (industry, workflow, agent, color) => {
+                const key = getMemoKey(industry, workflow, agent);
+                setAgentColors(prev => ({
+                    ...prev,
+                    [key]: color
+                }));
+            };
+
+            const industryColors = {
+                'FSI': { bg: 'bg-blue-600', hex: '#2563eb' },
+                '제조': { bg: 'bg-orange-600', hex: '#ea580c' },
+                '유통': { bg: 'bg-rose-600', hex: '#e11d48' },
+                'Emerging biz & Game': { bg: 'bg-lime-600', hex: '#65a30d' },
+                'Public': { bg: 'bg-indigo-600', hex: '#4f46e5' },
+                'Telco&Media': { bg: 'bg-purple-600', hex: '#9333ea' },
+                'Vertical Enterprise': { bg: 'bg-teal-600', hex: '#0d9488' }
+            };
+
+            const itemsByIndustry = useMemo(() => {
+                const result = {};
+                Object.entries(currentData).forEach(([industry, workflows]) => {
+                    result[industry] = new Set();
+                    Object.values(workflows).forEach(items => {
+                        if (items) items.forEach(item => { if (item !== '없음') result[industry].add(item); });
+                    });
+                });
+                return result;
+            }, [currentData]);
+
+            const totalItems = useMemo(() => {
+                const all = new Set();
+                Object.values(itemsByIndustry).forEach(set => set.forEach(item => all.add(item)));
+                return all;
+            }, [itemsByIndustry]);
+
+            // Icons
+            const SearchIcon = () => (
+                <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <circle cx="11" cy="11" r="8"></circle><path d="m21 21-4.35-4.35"></path>
+                </svg>
+            );
+            const ZoomInIcon = () => (
+                <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <circle cx="11" cy="11" r="8"></circle><path d="m21 21-4.35-4.35"></path>
+                    <line x1="11" y1="8" x2="11" y2="14"></line><line x1="8" y1="11" x2="14" y2="11"></line>
+                </svg>
+            );
+            const ZoomOutIcon = () => (
+                <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <circle cx="11" cy="11" r="8"></circle><path d="m21 21-4.35-4.35"></path>
+                    <line x1="8" y1="11" x2="14" y2="11"></line>
+                </svg>
+            );
+            const ExternalLinkIcon = ({ size = 18 }) => (
+                <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path>
+                    <polyline points="15 3 21 3 21 9"></polyline><line x1="10" y1="14" x2="21" y2="3"></line>
+                </svg>
+            );
+            const EditIcon = ({ size = 16 }) => (
+                <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
+                    <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path>
+                </svg>
+            );
+            const TrashIcon = ({ size = 16 }) => (
+                <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <polyline points="3 6 5 6 21 6"></polyline>
+                    <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+                </svg>
+            );
+            const PlusIcon = ({ size = 20 }) => (
+                <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                    <line x1="12" y1="5" x2="12" y2="19"></line>
+                    <line x1="5" y1="12" x2="19" y2="12"></line>
+                </svg>
+            );
+            const MessageSquareIcon = ({ size = 16 }) => (
+                <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>
+                </svg>
+            );
+            const GlobeIcon = () => (
+                <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <circle cx="12" cy="12" r="10"></circle><line x1="2" y1="12" x2="22" y2="12"></line>
+                    <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"></path>
+                </svg>
+            );
+            const ArrowRightIcon = () => (
+                <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3">
+                    <path d="M5 12h14"></path><path d="m12 5 7 7-7 7"></path>
+                </svg>
+            );
+
+            // Workflow Diagram Map
+            const WorkflowDiagramMap = ({ industry }) => {
+                const specificWorkflows = industrySpecificWorkflows[industry] || [];
+                const data = currentData[industry];
+
+                return (
+                    <div className="space-y-6">
+                        <div className="flex items-center justify-between">
+                            <div className="flex items-center gap-4">
+                                <div className={`w-14 h-14 rounded-2xl ${industryColors[industry].bg} flex items-center justify-center text-white shadow-lg text-2xl font-bold`}>
+                                    {translateIndustry(industry).charAt(0)}
+                                </div>
+                                <div>
+                                    <h2 className="text-2xl font-bold text-gray-900">{translateIndustry(industry)}</h2>
+                                    <p className="text-gray-500">{t.industryWorkflowTitle}</p>
+                                </div>
+                            </div>
+                            <button onClick={() => { setSelectedIndustry(null); setSelectedWorkflow(null); }}
+                                className="px-5 py-2.5 bg-gray-800 text-white rounded-xl hover:bg-gray-900 transition-all shadow-lg font-semibold">
+                                {t.backToOverview}
+                            </button>
+                        </div>
+
+                        <div className="bg-white rounded-2xl shadow-lg border border-gray-200 p-6">
+                            <h3 className="text-lg font-bold text-gray-900 mb-2">{t.workflowDiagram}</h3>
+                            <p className="text-sm text-gray-500 mb-6">{t.clickWorkflow}</p>
+                            
+                            <div className="flex items-center justify-center flex-wrap gap-2">
+                                {specificWorkflows.map((wf, idx) => {
+                                    const isSelected = selectedWorkflow === wf;
+                                    const isHovered = hoveredWorkflow === wf;
+                                    const agentCount = (data[wf] || []).length;
+                                    
+                                    return (
+                                        <React.Fragment key={wf}>
+                                            <div
+                                                className={`relative cursor-pointer transition-all duration-300 ${isSelected ? 'scale-110 z-10' : isHovered ? 'scale-105' : ''}`}
+                                                onMouseEnter={() => setHoveredWorkflow(wf)}
+                                                onMouseLeave={() => setHoveredWorkflow(null)}
+                                                onClick={() => setSelectedWorkflow(wf)}
+                                            >
+                                                <div className={`px-5 py-4 rounded-2xl text-white font-bold shadow-lg transition-all ${isSelected ? 'ring-4 ring-offset-2' : ''}`}
+                                                    style={{ backgroundColor: workflowColors[wf], ringColor: workflowColors[wf] }}>
+                                                    <div className="text-center">
+                                                        <div className="text-sm font-bold whitespace-nowrap">{translateWorkflow(wf)}</div>
+                                                        <div className="text-xs opacity-80 mt-1">{agentCount} Agents</div>
+                                                    </div>
+                                                </div>
+                                                <div className="absolute -top-2 -left-2 w-7 h-7 rounded-full bg-white shadow-md flex items-center justify-center text-sm font-bold"
+                                                    style={{ color: workflowColors[wf] }}>{idx + 1}</div>
+                                            </div>
+                                            {idx < specificWorkflows.length - 1 && (
+                                                <div className="text-gray-300 flow-arrow mx-1"><ArrowRightIcon /></div>
+                                            )}
+                                        </React.Fragment>
+                                    );
+                                })}
+                            </div>
+                        </div>
+
+                        <div className="bg-white rounded-2xl shadow-lg border border-gray-200 overflow-hidden">
+                            {selectedWorkflow ? (
+                                <>
+                                    <div className="px-6 py-4 text-white" style={{ backgroundColor: workflowColors[selectedWorkflow] }}>
+                                        <div className="flex items-center justify-between">
+                                            <div className="flex items-center gap-3">
+                                                <div className="w-10 h-10 rounded-full bg-white/20 flex items-center justify-center font-bold text-lg">
+                                                    {specificWorkflows.indexOf(selectedWorkflow) + 1}
+                                                </div>
+                                                <div>
+                                                    <h3 className="text-xl font-bold">{translateWorkflow(selectedWorkflow)}</h3>
+                                                    <p className="text-white/80 text-sm">{t.agentList}</p>
+                                                </div>
+                                            </div>
+                                            <div className="flex items-center gap-3">
+                                                <div className="text-white/80 text-sm">{(data[selectedWorkflow] || []).length} Agents</div>
+                                                {editMode && isAdmin && (
+                                                    <button
+                                                        onClick={() => handleOpenAddModalWithPicker(selectedIndustry, selectedWorkflow)}
+                                                        className="px-3 py-2 bg-green-500 hover:bg-green-600 text-white rounded-lg font-semibold text-sm transition-all flex items-center gap-2"
+                                                        title="Agent 추가"
+                                                    >
+                                                        <PlusIcon size={18} />
+                                                        추가
+                                                    </button>
+                                                )}
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div className="p-6">
+                                        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3">
+                                            {(data[selectedWorkflow] || [])
+                                                .filter(agent => !searchTerm || agent.toLowerCase().includes(searchTerm.toLowerCase()))
+                                                .map((agent, idx) => {
+                                                    const isEditing = editingItem?.industry === selectedIndustry && 
+                                                                    editingItem?.workflow === selectedWorkflow && 
+                                                                    editingItem?.itemIndex === idx;
+                                                    
+                                                    if (isEditing) {
+                                                        return (
+                                                            <div key={`${agent}-${idx}`} className="p-4 bg-white rounded-xl border-2 border-blue-400">
+                                                                <input
+                                                                    type="text"
+                                                                    value={editValue}
+                                                                    onChange={(e) => setEditValue(e.target.value)}
+                                                                    onKeyPress={(e) => e.key === 'Enter' && handleSaveEdit()}
+                                                                    className="w-full px-2 py-1 border border-gray-300 rounded text-sm mb-2"
+                                                                    autoFocus
+                                                                    placeholder="AI Agent 명을 입력하세요 (한글/영문)"
+                                                                />
+                                                                <div className="flex gap-2 mb-2">
+                                                                    <span className="text-xs text-gray-600 font-semibold">글꼴 색상:</span>
+                                                                    <button
+                                                                        onClick={() => setEditingItem({...editingItem, color: 'black'})}
+                                                                        className={`px-3 py-1 rounded text-xs font-semibold transition-all ${
+                                                                            editingItem?.color === 'black' 
+                                                                                ? 'bg-gray-800 text-white' 
+                                                                                : 'bg-gray-200 text-gray-800 hover:bg-gray-300'
+                                                                        }`}
+                                                                    >
+                                                                        검은색
+                                                                    </button>
+                                                                    <button
+                                                                        onClick={() => setEditingItem({...editingItem, color: 'blue'})}
+                                                                        className={`px-3 py-1 rounded text-xs font-semibold transition-all ${
+                                                                            editingItem?.color === 'blue' 
+                                                                                ? 'bg-blue-600 text-white' 
+                                                                                : 'bg-blue-100 text-blue-800 hover:bg-blue-200'
+                                                                        }`}
+                                                                    >
+                                                                        파란색
+                                                                    </button>
+                                                                </div>
+                                                                <div className="flex gap-1">
+                                                                    <button onClick={handleSaveEdit} className="flex-1 py-1 bg-green-500 text-white rounded text-xs font-semibold">
+                                                                        {t.save}
+                                                                    </button>
+                                                                    <button onClick={handleCancelEdit} className="flex-1 py-1 bg-gray-500 text-white rounded text-xs font-semibold">
+                                                                        {t.cancel}
+                                                                    </button>
+                                                                </div>
+                                                            </div>
+                                                        );
+                                                    }
+                                                    
+                                                    return (
+                                                        <div key={`${agent}-${idx}`}
+                                                            className={`p-4 rounded-xl border-2 transition-all ${
+                                                                editMode ? 'bg-gray-50 border-gray-300' :
+                                                                clickedItem === agent ? 'bg-green-50 border-green-400' : 
+                                                                'bg-gray-50 border-gray-200 hover:border-blue-400 cursor-pointer hover:shadow-lg hover:scale-[1.02]'
+                                                            }`}>
+                                                            <div className="flex items-start gap-3">
+                                                                <div className="w-8 h-8 rounded-lg flex items-center justify-center text-white font-bold text-sm flex-shrink-0"
+                                                                    style={{ backgroundColor: workflowColors[selectedWorkflow] }}>{idx + 1}</div>
+                                                                <div className="flex-1 min-w-0">
+                                                                    <p 
+                                                                        className="font-medium text-sm truncate" 
+                                                                        title={agent}
+                                                                        style={{ color: getAgentColor(selectedIndustry, selectedWorkflow, agent) === 'blue' ? '#2563eb' : '#111827' }}
+                                                                    >
+                                                                        {agent}
+                                                                    </p>
+                                                                    
+                                                                    {/* 메모 표시 (일반 모드 & 메모 있을 때) */}
+                                                                    {!editMode && hasMemo(selectedIndustry, selectedWorkflow, agent) && (
+                                                                        <div className="mt-2 p-2 bg-blue-50 border border-blue-200 rounded-lg relative">
+                                                                            <div className="absolute -top-1 left-3 w-2 h-2 bg-blue-50 border-l border-t border-blue-200 transform rotate-45"></div>
+                                                                            <p className="text-xs text-blue-800 leading-relaxed">
+                                                                                {agentMemos[getMemoKey(selectedIndustry, selectedWorkflow, agent)]}
+                                                                            </p>
+                                                                        </div>
+                                                                    )}
+                                                                    
+                                                                    {!editMode && (
+                                                                        <div className="flex items-center gap-2 mt-1">
+                                                                            <p className="text-xs text-gray-500 flex items-center gap-1 cursor-pointer" onClick={() => handleItemClick(agent)}>
+                                                                                <ExternalLinkIcon size={12} />{t.clickToConnect}
+                                                                            </p>
+                                                                            <button
+                                                                                onClick={() => handleOpenMemo(selectedIndustry, selectedWorkflow, agent)}
+                                                                                className={`p-1 rounded transition-colors ${
+                                                                                    hasMemo(selectedIndustry, selectedWorkflow, agent)
+                                                                                        ? 'bg-blue-100 text-blue-600 hover:bg-blue-200'
+                                                                                        : 'bg-gray-100 text-gray-400 hover:bg-gray-200'
+                                                                                }`}
+                                                                                title="메모"
+                                                                            >
+                                                                                <MessageSquareIcon size={14} />
+                                                                            </button>
+                                                                        </div>
+                                                                    )}
+                                                                    {editMode && isAdmin && (
+                                                                        <div className="flex gap-1 mt-2">
+                                                                            <button
+                                                                                onClick={() => handleEditItem(selectedIndustry, selectedWorkflow, idx, agent)}
+                                                                                className="p-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors"
+                                                                                title="수정"
+                                                                            >
+                                                                                <EditIcon size={16} />
+                                                                            </button>
+                                                                            <button
+                                                                                onClick={() => handleDeleteItem(selectedIndustry, selectedWorkflow, idx)}
+                                                                                className="p-2 bg-red-500 text-white rounded-lg hover:bg-red-600 transition-colors"
+                                                                                title="삭제"
+                                                                            >
+                                                                                <TrashIcon size={16} />
+                                                                            </button>
+                                                                            <button
+                                                                                onClick={() => handleOpenMemo(selectedIndustry, selectedWorkflow, agent)}
+                                                                                className={`p-2 rounded-lg transition-colors ${
+                                                                                    hasMemo(selectedIndustry, selectedWorkflow, agent)
+                                                                                        ? 'bg-blue-500 text-white hover:bg-blue-600'
+                                                                                        : 'bg-gray-400 text-white hover:bg-gray-500'
+                                                                                }`}
+                                                                                title="메모"
+                                                                            >
+                                                                                <MessageSquareIcon size={16} />
+                                                                            </button>
+                                                                        </div>
+                                                                    )}
+                                                                </div>
+                                                            </div>
+                                                        </div>
+                                                    );
+                                                })}
+                                        </div>
+                                    </div>
+                                </>
+                            ) : (
+                                <div className="p-12 text-center text-gray-500">
+                                    <div className="text-4xl mb-4">👆</div>
+                                    <p>{t.selectWorkflow}</p>
+                                </div>
+                            )}
+                        </div>
+                    </div>
+                );
+            };
+
+            // Overview Table
+            const OverviewTable = () => {
+                const workflows = activeTab === 'agent' ? commonWorkflows : saleskitCategories;
+
+                return (
+                    <div className="space-y-4">
+                        {activeTab === 'agent' && (
+                            <div className="bg-gradient-to-r from-blue-50 to-indigo-50 rounded-xl p-4 border border-blue-200">
+                                <div className="flex items-center gap-3">
+                                    <span className="text-2xl">🚇</span>
+                                    <div>
+                                        <p className="font-semibold text-gray-900">{t.clickForMap}</p>
+                                        <p className="text-sm text-gray-600">상단 산업군 카드 클릭 시 해당 산업의 특화 Workflow Map을 확인할 수 있습니다</p>
+                                    </div>
+                                </div>
+                            </div>
+                        )}
+
+                        {activeTab === 'agent' && (
+                            <h3 className="text-lg font-bold text-gray-800 flex items-center gap-2">📋 {t.commonWorkflowTitle}</h3>
+                        )}
+
+                        <div className="bg-white rounded-xl shadow-xl overflow-hidden border border-gray-200" style={{ fontSize: `${zoom}%` }}>
+                            <div className="overflow-x-auto">
+                                <table className="w-full border-collapse">
+                                    <thead>
+                                        <tr>
+                                            <th className="sticky left-0 z-20 bg-gray-900 text-white px-4 py-4 text-left font-bold border-r-2 border-gray-700 min-w-[130px]">
+                                                {t.workflowLabel} / {t.industryLabel}
+                                            </th>
+                                            {industries.map((industry, idx) => (
+                                                <th key={idx} 
+                                                    className={`${industryColors[industry].bg} text-white px-3 py-3 text-center font-bold border-r border-gray-700 min-w-[150px] cursor-pointer hover:opacity-90 transition-all`}
+                                                    onClick={() => activeTab === 'agent' && setSelectedIndustry(industry)}>
+                                                    <div className="flex flex-col items-center">
+                                                        <span className="text-sm font-bold">{translateIndustry(industry)}</span>
+                                                        <span className="text-xs opacity-90 mt-0.5">{itemsByIndustry[industry]?.size || 0} {activeTab === 'agent' ? t.agents : t.files}</span>
+                                                        {activeTab === 'agent' && (
+                                                            <span className="text-[10px] opacity-80 mt-1 bg-white/20 px-2 py-0.5 rounded-full">🚇 Workflow Map</span>
+                                                        )}
+                                                    </div>
+                                                </th>
+                                            ))}
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {workflows.map((workflow, rowIdx) => (
+                                            <tr key={rowIdx} className="border-b border-gray-200 hover:bg-gray-50">
+                                                <td className="sticky left-0 z-10 bg-gray-800 text-white px-4 py-3 font-semibold border-r-2 border-gray-600 text-sm">
+                                                    <div className="flex items-center gap-2">
+                                                        {activeTab === 'agent' && (
+                                                            <div className="w-3 h-3 rounded-full" style={{ backgroundColor: workflowColors[workflow] || '#6b7280' }}></div>
+                                                        )}
+                                                        {translateWorkflow(workflow)}
+                                                    </div>
+                                                </td>
+                                                {industries.map((industry, colIdx) => {
+                                                    const items = currentData[industry]?.[workflow] || [];
+                                                    const displayItems = searchTerm ? items.filter(i => i.toLowerCase().includes(searchTerm.toLowerCase())) : items;
+
+                                                    return (
+                                                        <td key={colIdx} className="px-2 py-2 border-r border-gray-200 bg-gray-50 align-top">
+                                                            {displayItems.length === 0 && !editMode ? (
+                                                                <div className="text-center text-gray-400 text-xs py-2">{t.noData}</div>
+                                                            ) : (
+                                                                <div className="space-y-1">
+                                                                    <div className="flex items-center justify-between mb-1">
+                                                                        <div className="text-xs text-gray-500 font-semibold">
+                                                                            {displayItems.length} {activeTab === 'agent' ? t.agents : t.files}
+                                                                        </div>
+                                                                        {editMode && isAdmin && (
+                                                                            <button
+                                                                                onClick={() => handleOpenAddModalWithPicker(industry, workflow)}
+                                                                                className="p-1 bg-green-500 text-white rounded-full hover:bg-green-600 transition-colors"
+                                                                                title="항목 추가"
+                                                                            >
+                                                                                <PlusIcon size={18} />
+                                                                            </button>
+                                                                        )}
+                                                                    </div>
+                                                                    {displayItems.map((item, itemIdx) => {
+                                                                        const isEditing = editingItem?.industry === industry && 
+                                                                                        editingItem?.workflow === workflow && 
+                                                                                        editingItem?.itemIndex === itemIdx;
+                                                                        
+                                                                        if (isEditing) {
+                                                                            return (
+                                                                                <div key={itemIdx} className="space-y-1">
+                                                                                    <input
+                                                                                        type="text"
+                                                                                        value={editValue}
+                                                                                        onChange={(e) => setEditValue(e.target.value)}
+                                                                                        onKeyPress={(e) => e.key === 'Enter' && handleSaveEdit()}
+                                                                                        className="w-full px-2 py-1 border border-blue-400 rounded text-xs"
+                                                                                        autoFocus
+                                                                                        placeholder="AI Agent 명 (한글/영문)"
+                                                                                    />
+                                                                                    {activeTab === 'agent' && (
+                                                                                        <div className="flex gap-1 items-center">
+                                                                                            <span className="text-[10px] text-gray-600">색상:</span>
+                                                                                            <button
+                                                                                                onClick={() => setEditingItem({...editingItem, color: 'black'})}
+                                                                                                className={`px-2 py-0.5 rounded text-[10px] font-semibold ${
+                                                                                                    editingItem?.color === 'black' 
+                                                                                                        ? 'bg-gray-800 text-white' 
+                                                                                                        : 'bg-gray-200 text-gray-800'
+                                                                                                }`}
+                                                                                            >
+                                                                                                검은색
+                                                                                            </button>
+                                                                                            <button
+                                                                                                onClick={() => setEditingItem({...editingItem, color: 'blue'})}
+                                                                                                className={`px-2 py-0.5 rounded text-[10px] font-semibold ${
+                                                                                                    editingItem?.color === 'blue' 
+                                                                                                        ? 'bg-blue-600 text-white' 
+                                                                                                        : 'bg-blue-100 text-blue-800'
+                                                                                                }`}
+                                                                                            >
+                                                                                                파란색
+                                                                                            </button>
+                                                                                        </div>
+                                                                                    )}
+                                                                                    <div className="flex gap-1">
+                                                                                        <button 
+                                                                                            onClick={handleSaveEdit} 
+                                                                                            className="flex-1 py-0.5 bg-green-500 text-white rounded text-xs font-semibold"
+                                                                                        >
+                                                                                            {t.save}
+                                                                                        </button>
+                                                                                        <button 
+                                                                                            onClick={handleCancelEdit} 
+                                                                                            className="flex-1 py-0.5 bg-gray-500 text-white rounded text-xs font-semibold"
+                                                                                        >
+                                                                                            {t.cancel}
+                                                                                        </button>
+                                                                                    </div>
+                                                                                </div>
+                                                                            );
+                                                                        }
+                                                                        
+                                                                        // 편집 모드가 아닐 때는 처음 3개만, 편집 모드일 때는 모두 표시
+                                                                        if (!editMode && itemIdx >= 3) return null;
+                                                                        
+                                                                        return (
+                                                                            <div key={itemIdx} className={editMode ? "space-y-1" : ""}>
+                                                                                <div className="flex items-center gap-1">
+                                                                                    <button
+                                                                                        onClick={() => !editMode && handleItemClick(item)}
+                                                                                        disabled={editMode}
+                                                                                        className={`flex-1 px-2 py-1.5 bg-white rounded border text-xs text-left transition-all ${
+                                                                                            editMode ? 'border-gray-300' :
+                                                                                            clickedItem === item ? 'border-green-500 bg-green-50' : 
+                                                                                            'hover:shadow-md hover:scale-[1.02] border-gray-200 hover:border-blue-400'
+                                                                                        }`}
+                                                                                    >
+                                                                                        <span 
+                                                                                            className="font-medium line-clamp-1"
+                                                                                            style={{ 
+                                                                                                color: activeTab === 'agent' && getAgentColor(industry, workflow, item) === 'blue' 
+                                                                                                    ? '#2563eb' 
+                                                                                                    : '#1f2937' 
+                                                                                            }}
+                                                                                        >
+                                                                                            {item}
+                                                                                        </span>
+                                                                                    </button>
+                                                                                    {!editMode && activeTab === 'agent' && (
+                                                                                        <button
+                                                                                            onClick={() => handleOpenMemo(industry, workflow, item)}
+                                                                                            className={`p-1 rounded transition-colors ${
+                                                                                                hasMemo(industry, workflow, item)
+                                                                                                    ? 'bg-blue-100 text-blue-600 hover:bg-blue-200'
+                                                                                                    : 'bg-gray-100 text-gray-400 hover:bg-gray-200'
+                                                                                            }`}
+                                                                                            title="메모"
+                                                                                        >
+                                                                                            <MessageSquareIcon size={12} />
+                                                                                        </button>
+                                                                                    )}
+                                                                                </div>
+                                                                                {editMode && isAdmin && (
+                                                                                    <div className="flex gap-1">
+                                                                                        <button
+                                                                                            onClick={() => handleEditItem(industry, workflow, itemIdx, item)}
+                                                                                            className="p-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors"
+                                                                                            title="수정"
+                                                                                        >
+                                                                                            <EditIcon size={14} />
+                                                                                        </button>
+                                                                                        <button
+                                                                                            onClick={() => handleDeleteItem(industry, workflow, itemIdx)}
+                                                                                            className="p-2 bg-red-500 text-white rounded-lg hover:bg-red-600 transition-colors"
+                                                                                            title="삭제"
+                                                                                        >
+                                                                                            <TrashIcon size={14} />
+                                                                                        </button>
+                                                                                        {activeTab === 'agent' && (
+                                                                                            <button
+                                                                                                onClick={() => handleOpenMemo(industry, workflow, item)}
+                                                                                                className={`p-2 rounded-lg transition-colors ${
+                                                                                                    hasMemo(industry, workflow, item)
+                                                                                                        ? 'bg-blue-500 text-white hover:bg-blue-600'
+                                                                                                        : 'bg-gray-400 text-white hover:bg-gray-500'
+                                                                                                }`}
+                                                                                                title="메모"
+                                                                                            >
+                                                                                                <MessageSquareIcon size={14} />
+                                                                                            </button>
+                                                                                        )}
+                                                                                    </div>
+                                                                                )}
+                                                                            </div>
+                                                                        );
+                                                                    })}
+                                                                    {displayItems.length > 3 && !editMode && (
+                                                                        <div className="text-xs text-gray-500 text-center">
+                                                                            +{displayItems.length - 3} more
+                                                                        </div>
+                                                                    )}
+                                                                </div>
+                                                            )}
+                                                        </td>
+                                                    );
+                                                })}
+                                            </tr>
+                                        ))}
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                );
+            };
+
+            // Presentation Schedule Table
+            const PresentationTable = () => {
+                const months = t.months;
+
+                return (
+                    <div className="space-y-4">
+                        <div className="flex items-center justify-between">
+                            <div>
+                                <h3 className="text-xl font-bold text-gray-900">{t.presentationTitle}</h3>
+                                <p className="text-sm text-gray-500">{t.presentationSubtitle}</p>
+                            </div>
+                            {editMode && isAdmin && (
+                                <button
+                                    onClick={() => setShowAddEventModal(true)}
+                                    className="flex items-center gap-2 px-4 py-2 bg-green-500 text-white rounded-lg hover:bg-green-600 transition-all shadow font-semibold"
+                                >
+                                    <PlusIcon size={18} />
+                                    {t.addEvent}
+                                </button>
+                            )}
+                        </div>
+
+                        <div className="bg-white rounded-xl shadow-xl overflow-hidden border border-gray-200">
+                            <div className="overflow-x-auto">
+                                <table className="w-full border-collapse" style={{ fontSize: `${zoom}%` }}>
+                                    <thead>
+                                        <tr>
+                                            <th className="sticky left-0 z-20 bg-gray-900 text-white px-4 py-4 text-left font-bold border-r-2 border-gray-700 min-w-[200px]">
+                                                {t.eventName}
+                                            </th>
+                                            {months.map((month, idx) => (
+                                                <th key={idx} className="bg-indigo-600 text-white px-2 py-3 text-center font-bold border-r border-indigo-500 min-w-[100px]">
+                                                    {month}
+                                                </th>
+                                            ))}
+                                            <th className="bg-gray-700 text-white px-3 py-3 text-center font-bold min-w-[80px]">
+                                                
+                                            </th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {presentationData.events.map((event, eventIdx) => (
+                                            <tr key={event.id} className="border-b border-gray-200 hover:bg-gray-50">
+                                                <td className="sticky left-0 z-10 bg-gray-800 text-white px-4 py-3 font-semibold border-r-2 border-gray-600">
+                                                    {editingEventName === event.id ? (
+                                                        <div className="space-y-2">
+                                                            <input
+                                                                type="text"
+                                                                value={editEventNameValue}
+                                                                onChange={(e) => setEditEventNameValue(e.target.value)}
+                                                                onKeyPress={(e) => e.key === 'Enter' && handleSaveEventName()}
+                                                                className="w-full px-2 py-1 border border-blue-400 rounded text-sm text-gray-900"
+                                                                autoFocus
+                                                            />
+                                                            <div className="flex gap-1">
+                                                                <button 
+                                                                    onClick={handleSaveEventName} 
+                                                                    className="flex-1 py-1 bg-green-500 text-white rounded text-xs font-semibold hover:bg-green-600"
+                                                                >
+                                                                    저장
+                                                                </button>
+                                                                <button 
+                                                                    onClick={handleCancelEventNameEdit} 
+                                                                    className="flex-1 py-1 bg-gray-500 text-white rounded text-xs font-semibold hover:bg-gray-600"
+                                                                >
+                                                                    취소
+                                                                </button>
+                                                            </div>
+                                                        </div>
+                                                    ) : (
+                                                        <div className="flex items-center justify-between gap-2">
+                                                            <div className="flex items-center gap-2 flex-1">
+                                                                <span className="w-6 h-6 rounded-full bg-indigo-500 flex items-center justify-center text-xs font-bold">
+                                                                    {eventIdx + 1}
+                                                                </span>
+                                                                {event.name}
+                                                            </div>
+                                                            {editMode && isAdmin && (
+                                                                <button
+                                                                    onClick={() => handleEditEventName(event.id, event.name)}
+                                                                    className="p-1.5 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors flex-shrink-0"
+                                                                    title="행사명 수정"
+                                                                >
+                                                                    <EditIcon size={14} />
+                                                                </button>
+                                                            )}
+                                                        </div>
+                                                    )}
+                                                </td>
+                                                {months.map((_, monthIdx) => {
+                                                    const monthNum = monthIdx + 1;
+                                                    const cellValue = presentationData.schedule[event.id]?.[monthNum] || '';
+                                                    const isEditing = editingCell?.eventId === event.id && editingCell?.month === monthNum;
+
+                                                    return (
+                                                        <td key={monthIdx} className="px-2 py-2 border-r border-gray-200 bg-gray-50">
+                                                            {isEditing ? (
+                                                                <div className="flex flex-col gap-1">
+                                                                    <input
+                                                                        type="text"
+                                                                        value={editCellValue}
+                                                                        onChange={(e) => setEditCellValue(e.target.value)}
+                                                                        onKeyPress={(e) => e.key === 'Enter' && handleSaveCellEdit()}
+                                                                        className="w-full px-2 py-1 border border-blue-400 rounded text-sm focus:ring-2 focus:ring-blue-500 outline-none"
+                                                                        autoFocus
+                                                                    />
+                                                                    <button
+                                                                        onClick={openPresentationPicker}
+                                                                        className="w-full px-2 py-1 bg-blue-50 text-blue-700 text-xs rounded hover:bg-blue-100 border border-blue-200 font-semibold"
+                                                                    >
+                                                                        📁 Drive에서 파일 선택
+                                                                    </button>
+                                                                    <div className="flex gap-1">
+                                                                        <button onClick={handleSaveCellEdit}
+                                                                            className="flex-1 px-2 py-1 bg-green-500 text-white text-xs rounded hover:bg-green-600 font-semibold">
+                                                                            {t.save}
+                                                                        </button>
+                                                                        <button onClick={() => { setEditingCell(null); setEditCellValue(''); }}
+                                                                            className="flex-1 px-2 py-1 bg-gray-500 text-white text-xs rounded hover:bg-gray-600 font-semibold">
+                                                                            {t.cancel}
+                                                                        </button>
+                                                                    </div>
+                                                                </div>
+                                                            ) : (
+                                                                <div
+                                                                    className={`min-h-[40px] px-2 py-2 rounded transition-all ${
+                                                                        cellValue 
+                                                                            ? 'bg-indigo-100 border border-indigo-300 cursor-pointer hover:bg-indigo-200' 
+                                                                            : 'bg-gray-100 border border-dashed border-gray-300'
+                                                                    } ${editMode && isAdmin ? 'hover:bg-indigo-200' : ''}`}
+                                                                    onClick={() => {
+                                                                        if (editMode && isAdmin) {
+                                                                            setEditingCell({ eventId: event.id, month: monthNum });
+                                                                            setEditCellValue(cellValue);
+                                                                        } else if (cellValue && !editMode) {
+                                                                            handlePresentationCellClick(cellValue);
+                                                                        }
+                                                                    }}
+                                                                    title={editMode && isAdmin ? t.clickToEdit : (cellValue ? 'Google Drive에서 파일 열기' : '')}
+                                                                >
+                                                                    {cellValue ? (
+                                                                        <span className="text-sm font-medium text-indigo-800">{cellValue}</span>
+                                                                    ) : (
+                                                                        <span className="text-xs text-gray-400">+</span>
+                                                                    )}
+                                                                </div>
+                                                            )}
+                                                        </td>
+                                                    );
+                                                })}
+                                                <td className="px-2 py-2 bg-gray-100 text-center">
+                                                    {editMode && isAdmin && (
+                                                        <button
+                                                            onClick={() => handleDeleteEvent(event.id)}
+                                                            className="p-2 bg-red-500 text-white hover:bg-red-600 rounded-lg transition-colors"
+                                                            title={t.deleteEvent}
+                                                        >
+                                                            <TrashIcon size={16} />
+                                                        </button>
+                                                    )}
+                                                </td>
+                                            </tr>
+                                        ))}
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+
+                        <div className="text-xs text-gray-500 text-center">
+                            {presentationData.events.length}개 행사 × 12개월
+                        </div>
+                    </div>
+                );
+            };
+
+            return (
+                <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 p-6">
+                    {/* Click notification */}
+                    {clickedItem && (
+                        <div className="fixed top-4 right-4 z-50 bg-green-600 text-white px-6 py-4 rounded-lg shadow-2xl flex items-center gap-3 animate-bounce">
+                            <ExternalLinkIcon size={20} />
+                            <div>
+                                <div className="font-bold">{t.driveOpen}</div>
+                                <div className="text-sm opacity-90">{clickedItem}</div>
+                            </div>
+                        </div>
+                    )}
+
+                    {/* Login Modal */}
+                    {showLoginModal && (
+                        <div className="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
+                            <div className="bg-white rounded-xl shadow-2xl max-w-md w-full p-6 animate-slide-in">
+                                <h3 className="text-xl font-bold text-gray-900 mb-4">{t.adminLogin}</h3>
+                                <div className="mb-4">
+                                    <label className="block text-sm font-semibold text-gray-700 mb-2">{t.password}</label>
+                                    <input type="password" value={password}
+                                        onChange={(e) => { setPassword(e.target.value); setLoginError(''); }}
+                                        onKeyPress={(e) => e.key === 'Enter' && handleLogin()}
+                                        className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none" autoFocus />
+                                    {loginError && <p className="mt-2 text-sm text-red-600">{loginError}</p>}
+                                </div>
+                                <div className="flex gap-3">
+                                    <button onClick={handleLogin} className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-semibold">{t.login}</button>
+                                    <button onClick={() => { setShowLoginModal(false); setPassword(''); setLoginError(''); }} className="flex-1 px-4 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 font-semibold">{t.cancel}</button>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
+                    {/* Add Item Modal (AI Agent / Saleskit) */}
+                    {showAddModal && (
+                        <div className="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
+                            <div className="bg-white rounded-xl shadow-2xl max-w-lg w-full p-6 animate-slide-in">
+                                <h3 className="text-xl font-bold text-gray-900 mb-4">{t.addModalTitle}</h3>
+                                
+                                {/* Google Picker or Drive 안내 */}
+                                {GOOGLE_API_KEY === 'YOUR_API_KEY_HERE' || GOOGLE_CLIENT_ID === 'YOUR_CLIENT_ID_HERE' ? (
+                                    // API 키가 없을 때 - Drive 링크로 안내
+                                    <div className="mb-4 p-4 bg-blue-50 border border-blue-200 rounded-lg">
+                                        <div className="flex items-start gap-3">
+                                            <div className="text-2xl">📁</div>
+                                            <div className="flex-1">
+                                                <p className="text-sm font-semibold text-blue-900 mb-2">
+                                                    Google Drive 폴더 열기
+                                                </p>
+                                                <p className="text-xs text-blue-800 mb-2">
+                                                    1. 아래 버튼으로 Drive를 여세요<br/>
+                                                    2. 파일명을 복사하여 입력하세요
+                                                </p>
+                                                <button
+                                                    onClick={() => {
+                                                        const driveLink = activeTab === 'agent' ? AGENT_DRIVE_LINK : SALESKIT_DRIVE_LINK;
+                                                        window.open(driveLink, '_blank', 'width=1200,height=800');
+                                                    }}
+                                                    className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-semibold text-sm"
+                                                >
+                                                    📁 Google Drive 열기
+                                                </button>
+                                                <div className="mt-3 pt-3 border-t border-blue-200">
+                                                    <p className="text-xs text-blue-700 font-semibold mb-1">
+                                                        💡 Google Picker API를 활성화하면 파일을 직접 선택할 수 있습니다
+                                                    </p>
+                                                    <details className="text-xs text-blue-600">
+                                                        <summary className="cursor-pointer hover:underline">설정 방법 보기</summary>
+                                                        <div className="mt-2 p-2 bg-white rounded text-gray-700 space-y-1">
+                                                            <p>1. Google Cloud Console 접속</p>
+                                                            <p>2. APIs & Services → Credentials</p>
+                                                            <p>3. API Key와 OAuth Client ID 생성</p>
+                                                            <p>4. Google Picker API 활성화</p>
+                                                            <p>5. 코드의 GOOGLE_API_KEY와 GOOGLE_CLIENT_ID 교체</p>
+                                                        </div>
+                                                    </details>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                ) : (
+                                    // API 키가 있을 때 - Google Picker 버튼
+                                    <div className="mb-4 p-4 bg-green-50 border border-green-200 rounded-lg">
+                                        <div className="flex items-start gap-3">
+                                            <div className="text-2xl">✨</div>
+                                            <div className="flex-1">
+                                                <p className="text-sm font-semibold text-green-900 mb-2">
+                                                    Google Drive에서 파일 선택
+                                                </p>
+                                                <p className="text-xs text-green-800 mb-3">
+                                                    클릭하여 Drive에서 파일을 직접 선택하세요
+                                                </p>
+                                                <button
+                                                    onClick={openPicker}
+                                                    className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 font-semibold text-sm flex items-center gap-2"
+                                                >
+                                                    <span>📂</span> Drive에서 파일 선택
+                                                </button>
+                                            </div>
+                                        </div>
+                                    </div>
+                                )}
+
+                                <div className="mb-4">
+                                    <label className="block text-sm font-semibold text-gray-700 mb-2">
+                                        {addModalCell && `${translateIndustry(addModalCell.industry)} - ${translateWorkflow(addModalCell.workflow)}`}
+                                    </label>
+                                    <input
+                                        type="text"
+                                        value={newItemName}
+                                        onChange={(e) => setNewItemName(e.target.value)}
+                                        onKeyPress={(e) => e.key === 'Enter' && handleAddItem()}
+                                        placeholder={t.enterName}
+                                        className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
+                                        autoFocus
+                                    />
+                                    <p className="text-xs text-gray-500 mt-2">
+                                        예시: FSI_Proposal_Q1_2024.pptx
+                                    </p>
+                                </div>
+                                <div className="flex gap-3">
+                                    <button onClick={handleAddItem} className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-semibold">
+                                        {t.addButton}
+                                    </button>
+                                    <button onClick={() => setShowAddModal(false)} className="flex-1 px-4 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 font-semibold">
+                                        {t.cancel}
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
+                    {/* Add Event Modal */}
+                    {showAddEventModal && (
+                        <div className="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
+                            <div className="bg-white rounded-xl shadow-2xl max-w-md w-full p-6 animate-slide-in">
+                                <h3 className="text-xl font-bold text-gray-900 mb-4">{t.addEventTitle}</h3>
+                                <div className="mb-4">
+                                    <label className="block text-sm font-semibold text-gray-700 mb-2">{t.eventName}</label>
+                                    <input type="text" value={newEventName}
+                                        onChange={(e) => setNewEventName(e.target.value)}
+                                        onKeyPress={(e) => e.key === 'Enter' && handleAddEvent()}
+                                        placeholder={t.enterEventName}
+                                        className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 outline-none" autoFocus />
+                                </div>
+                                <div className="flex gap-3">
+                                    <button onClick={handleAddEvent} className="flex-1 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 font-semibold">{t.addEvent}</button>
+                                    <button onClick={() => { setShowAddEventModal(false); setNewEventName(''); }} className="flex-1 px-4 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 font-semibold">{t.cancel}</button>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
+                    {/* Agent Memo Modal */}
+                    {showMemoModal && (
+                        <div className="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
+                            <div className="bg-white rounded-xl shadow-2xl max-w-lg w-full p-6 animate-slide-in">
+                                <div className="flex items-center gap-3 mb-4">
+                                    <div className="p-2 bg-blue-100 rounded-lg">
+                                        <MessageSquareIcon size={24} className="text-blue-600" />
+                                    </div>
+                                    <div>
+                                        <h3 className="text-xl font-bold text-gray-900">AI Agent 메모</h3>
+                                        <p className="text-sm text-gray-600">{currentMemo.agent}</p>
+                                    </div>
+                                </div>
+                                
+                                <div className="mb-4">
+                                    <label className="block text-sm font-semibold text-gray-700 mb-2">
+                                        AI Agent 소개 문구
+                                    </label>
+                                    <textarea
+                                        value={currentMemo.text}
+                                        onChange={(e) => setCurrentMemo({ ...currentMemo, text: e.target.value })}
+                                        placeholder="이 AI Agent에 대한 설명을 입력하세요&#10;예: 고객 서비스 자동화를 위한 챗봇 Agent입니다."
+                                        className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none resize-none"
+                                        rows="5"
+                                        autoFocus
+                                    />
+                                    <p className="text-xs text-gray-500 mt-2">
+                                        💡 이 메모는 워크플로우 상세 화면에서 말풍선으로 표시됩니다
+                                    </p>
+                                </div>
+                                
+                                <div className="flex gap-2">
+                                    <button 
+                                        onClick={handleSaveMemo} 
+                                        className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-semibold"
+                                    >
+                                        저장
+                                    </button>
+                                    {hasMemo(currentMemo.industry, currentMemo.workflow, currentMemo.agent) && (
+                                        <button 
+                                            onClick={handleDeleteMemo} 
+                                            className="px-4 py-2 bg-red-500 text-white rounded-lg hover:bg-red-600 font-semibold"
+                                            title="메모 삭제"
+                                        >
+                                            삭제
+                                        </button>
+                                    )}
+                                    <button 
+                                        onClick={() => setShowMemoModal(false)} 
+                                        className="px-4 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 font-semibold"
+                                    >
+                                        취소
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+                    
+                    <div className="max-w-[1900px] mx-auto">
+                        {/* Header */}
+                        <div className="mb-6">
+                            <div className="flex items-center justify-between mb-4">
+                                <div>
+                                    <h1 className="text-3xl font-bold text-gray-900 mb-1">{t.title}</h1>
+                                    <p className="text-gray-600">{t.subtitle}</p>
+                                </div>
+                                <div className="flex items-center gap-2">
+                                    <button onClick={() => setLanguage(language === 'ko' ? 'en' : 'ko')} className="flex items-center gap-2 px-3 py-2 bg-gray-700 text-white rounded-lg hover:bg-gray-800 transition-colors shadow">
+                                        <GlobeIcon /><span className="font-semibold text-sm">{language === 'ko' ? 'EN' : 'KO'}</span>
+                                    </button>
+                                    {isAdmin && (
+                                        <button onClick={handleLogout} className="px-3 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700 shadow font-semibold text-sm">👤 {t.logout}</button>
+                                    )}
+                                    {(activeTab === 'agent' || activeTab === 'saleskit') && (
+                                        <button onClick={handleEditModeToggle} className={`px-3 py-2 rounded-lg shadow font-semibold text-sm ${
+                                            editMode ? 'bg-red-600 text-white hover:bg-red-700' : 'bg-green-600 text-white hover:bg-green-700'
+                                        }`}>
+                                            ✏️ {editMode ? t.editComplete : t.editMode}
+                                        </button>
+                                    )}
+                                    <button onClick={handleResetData} className="px-3 py-2 bg-orange-600 text-white rounded-lg hover:bg-orange-700 shadow font-semibold text-sm"
+                                        disabled={!isAdmin} style={{ opacity: isAdmin ? 1 : 0.5 }}>{t.reset}</button>
+                                    <div className="flex items-center gap-1 bg-white px-3 py-2 rounded-lg shadow-sm border border-gray-200">
+                                        <button onClick={() => setZoom(Math.max(70, zoom - 10))} className="p-1 hover:bg-gray-100 rounded"><ZoomOutIcon /></button>
+                                        <span className="text-sm font-semibold min-w-[40px] text-center">{zoom}%</span>
+                                        <button onClick={() => setZoom(Math.min(130, zoom + 10))} className="p-1 hover:bg-gray-100 rounded"><ZoomInIcon /></button>
+                                    </div>
+                                </div>
+                            </div>
+
+                            {/* Tabs */}
+                            <div className="flex gap-2 mb-4">
+                                <button onClick={() => { setActiveTab('agent'); setSearchTerm(''); setSelectedIndustry(null); setSelectedWorkflow(null); }}
+                                    className={`px-5 py-2.5 rounded-lg font-bold transition-all ${activeTab === 'agent' ? 'bg-blue-600 text-white shadow-lg scale-105' : 'bg-white text-gray-700 hover:bg-gray-100'}`}>
+                                    🤖 {t.agentTab}
+                                </button>
+                                <button onClick={() => { setActiveTab('saleskit'); setSearchTerm(''); setSelectedIndustry(null); setSelectedWorkflow(null); }}
+                                    className={`px-5 py-2.5 rounded-lg font-bold transition-all ${activeTab === 'saleskit' ? 'bg-purple-600 text-white shadow-lg scale-105' : 'bg-white text-gray-700 hover:bg-gray-100'}`}>
+                                    📁 {t.saleskitTab}
+                                </button>
+                                <button onClick={() => { setActiveTab('presentation'); setSearchTerm(''); setSelectedIndustry(null); setSelectedWorkflow(null); }}
+                                    className={`px-5 py-2.5 rounded-lg font-bold transition-all ${activeTab === 'presentation' ? 'bg-indigo-600 text-white shadow-lg scale-105' : 'bg-white text-gray-700 hover:bg-gray-100'}`}>
+                                    📊 {t.presentationTab}
+                                </button>
+                            </div>
+
+                            {/* Stats Cards - Only for agent/saleskit tabs */}
+                            {activeTab !== 'presentation' && (
+                                <div className="grid grid-cols-8 gap-3 mb-4">
+                                    <div className="bg-white rounded-lg p-3 shadow-sm border border-gray-200">
+                                        <div className="text-xs text-gray-500">{t.totalAgents}</div>
+                                        <div className="text-2xl font-bold text-gray-900">{totalItems.size}</div>
+                                    </div>
+                                    {industries.map(industry => (
+                                        <div key={industry} 
+                                            className={`bg-white rounded-lg p-3 shadow-sm border-2 cursor-pointer transition-all hover:shadow-lg hover:scale-[1.03] ${
+                                                selectedIndustry === industry ? 'ring-2 ring-blue-500 border-blue-300' : 'border-gray-200'
+                                            }`}
+                                            onClick={() => activeTab === 'agent' && setSelectedIndustry(industry)}>
+                                            <div className="text-xs font-semibold truncate mb-0.5" style={{ color: industryColors[industry].hex }}>
+                                                {translateIndustry(industry)}
+                                            </div>
+                                            <div className="text-xl font-bold text-gray-900">
+                                                {itemsByIndustry[industry]?.size || 0}
+                                                <span className="text-[10px] text-gray-500 ml-1">{t.agents}</span>
+                                            </div>
+                                            {activeTab === 'agent' && (
+                                                <div className="text-[10px] text-blue-600 mt-1 font-medium">🚇 Click for map</div>
+                                            )}
+                                        </div>
+                                    ))}
+                                </div>
+                            )}
+
+                            {/* Search - Only for agent/saleskit tabs */}
+                            {activeTab !== 'presentation' && (
+                                <div className="relative">
+                                    <div className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400"><SearchIcon /></div>
+                                    <input type="text" placeholder={t.searchPlaceholder} value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)}
+                                        className="w-full pl-10 pr-4 py-2.5 rounded-lg border border-gray-300 focus:ring-2 focus:ring-blue-500 outline-none bg-white shadow-sm" />
+                                </div>
+                            )}
+                        </div>
+
+                        {/* Main Content */}
+                        {activeTab === 'presentation' ? (
+                            <PresentationTable />
+                        ) : activeTab === 'agent' && selectedIndustry ? (
+                            <WorkflowDiagramMap industry={selectedIndustry} />
+                        ) : (
+                            <OverviewTable />
+                        )}
+
+                        {/* Footer */}
+                        <div className="mt-4 text-xs text-gray-500 text-center">
+                            {activeTab === 'presentation' 
+                                ? `발표자료 일정 관리`
+                                : selectedIndustry 
+                                    ? `${translateIndustry(selectedIndustry)} - 특화 Workflow ${industrySpecificWorkflows[selectedIndustry]?.length || 0}개`
+                                    : activeTab === 'agent' 
+                                        ? `공통 Workflow ${commonWorkflows.length}개 × ${industries.length} 산업군`
+                                        : `${saleskitCategories.length} Categories × ${industries.length} Industries`
+                            }
+                        </div>
+                    </div>
+                </div>
+            );
+        };
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<Dashboard />);
+    </script>
+</body>
+</html>
